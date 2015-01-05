@@ -36,11 +36,11 @@ function __sef_get_ip() {
 }
 
 function sef_domain_check_for_registration($errors, $sanitized_user_login, $user_email) {
-    //fill out this list with any problem domains
+    //TODO: make this list configurable from the admin section!
     $spamdomains = array(
-        '.li',
         '.website',
-        '.ru'
+        '.ru',
+        '.xyz'
     );
     $ip = __sef_get_ip();
     foreach ($spamdomains as $domain) {

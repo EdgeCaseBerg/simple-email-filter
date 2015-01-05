@@ -4,9 +4,9 @@
  * @version 0.1
  */
 /*
-Plugin Name: Simple Email Filter
+Plugin Name: Simple Email Filter & User Ban
 Plugin URI: https://github.com/EdgeCaseBerg/simple-email-filter
-Description: Deny's registration to user's with emails that match a filter
+Description: Deny's registration to user's with emails that match a filter and ban users from logging in
 Author: Ethan J. Eldridge
 Version: 0.1
 Author URI: http://ethanjoachimeldridge.info
@@ -24,9 +24,15 @@ add_filter('user_row_actions', 'sef_userlist_actions',10, 2);
 /* Add menu pages in admin area */
 add_action('admin_menu', 'sef_register_subpages');
 
+/* Setup settings page */
+add_action( 'admin_menu', 'sef_add_admin_menu' );
+add_action( 'admin_init', 'sef_settings_init' );
+
+
 /* Conf */
 if (!defined('SEF_META_PREFIX')) define('SEF_META_PREFIX', 'sef-');
-if (!defined('SEF_BAN_MESSAGE')) defined('SEF_BAN_MESSAGE', 'It seem\'s you\'ve messed up and are banned, contact the site owner');
+if (!defined('SEF_BAN_MESSAGE')) define('SEF_BAN_MESSAGE', 'It seem\'s you\'ve messed up and are banned, contact the site owner');
+if (!defined('SEF_DENY_MESSAGE')) define('SEF_DENY_MESSAGE', 'Registration halted, please contact support.');
 
 function __sef_get_ip() {
 	return isset($_SERVER['X-Forwarded-For']) ? 
@@ -36,19 +42,12 @@ function __sef_get_ip() {
 }
 
 function sef_domain_check_for_registration($errors, $sanitized_user_login, $user_email) {
-    //TODO: make this list configurable from the admin section!
-    $spamdomains = array(
-        '.website',
-        '.ru',
-        '.xyz'
-    );
+    $spamdomains = get_option( 'sef_denied_domains' );
     $ip = __sef_get_ip();
     foreach ($spamdomains as $domain) {
         if ( strpos($user_email, $domain) !== false ) {
-            $errors->add( 'spam_error', __(st/'<strong>ERROR</strong>: Registration halted, please contact support.','sef_domain') );
+            $errors->add( 'spam_error', __('<strong>ERROR</strong>: ' . SEF_DENY_MESSAGE,'sef_domain') );
             error_log('SPAMALERT: [email:' . $user_email . ', IP Address: ' .  $ip .']');
-        } else { 
-            error_log('NEWUSER: [email:' . $user_email . ', IP Address: ' .  $ip .']');
         }
     }
 
@@ -57,31 +56,26 @@ function sef_domain_check_for_registration($errors, $sanitized_user_login, $user
 
 function sef_track_login_ip($user, $username, $password ) {
 	if (!is_null($user) && !is_wp_error($user)) {
-		if ( update_user_meta($user->ID, SEF_META_PREFIX . 'ipaddr', __sef_get_ip()) === false) {
-			error_log('SEF: Failed to save ip meta data for user ' . $user->ID);
-		}
+		update_user_meta($user->ID, SEF_META_PREFIX . 'ipaddr', __sef_get_ip());	
 
-		if ( get_user_meta($user->ID, SEF_META_PREFIX . 'banned')) {
+		$banned = get_user_meta($user->ID, SEF_META_PREFIX . 'banned', true);
+		if ( $banned === true || intval($banned) === 1 ) {
 			$user = new WP_Error( ':(', __( SEF_BAN_MESSAGE, "sef_domain" ) );
 		}
 	}
     return $user;
 }
 
-
 function sef_add_last_ip_column($columns) {
     $columns['last_ip'] = 'Last Known IP';
     return $columns;
 }
  
-
 function sef_last_ip_column_value($value, $column_name, $user_id) {
 	if ( 'last_ip' == $column_name )
 		return get_user_meta($user_id, SEF_META_PREFIX . 'ipaddr', true);
     return $value;
 }
-
-
 
 function sef_userlist_actions($actions, $user_object ) {
 	if (get_user_meta($user_object->ID, SEF_META_PREFIX . 'banned', true)) {
@@ -93,7 +87,6 @@ function sef_userlist_actions($actions, $user_object ) {
 }
 
 function sef_register_subpages() {
-   
 	add_submenu_page( 
           null   //or 'options.php' 
         , 'User has been banned'
@@ -137,4 +130,100 @@ function __unban_user_page() {
 		}
 		echo '<br><p>Go back to the <a href="' . admin_url('users.php') . '">list</a> page</p>';
 	}
+}
+
+
+function sef_add_admin_menu() { 
+	add_options_page( 'Simple Email Filter & User Ban', 'Registration Denials', 'manage_options', 'simple_email_filter_and_user_ban', 'sef_options_page' );
+}
+
+function sef_settings_init() { 
+	register_setting( 'pluginPage', 'sef_denied_domains' );
+
+	add_settings_section(
+		'sef_pluginPage_section', 
+		__( 'Update denied registration domains', 'sef_domain' ), 
+		'sef_denied_domains_callback', 
+		'pluginPage'
+	);
+
+	add_settings_field( 
+		'sef_text_field_0', 
+		__( 'Set and remove domains from registration denial', 'sef_domain' ), 
+		'sef_render_option_page', 
+		'pluginPage', 
+		'sef_pluginPage_section' 
+	);
+}
+
+function sef_render_option_page() { 
+	$options = get_option( 'sef_denied_domains' );
+	if(!is_array($options)) {
+		$options = array();
+	}
+	?>
+		<input id="sef-add-btn" type="button" class="button secondary" value="Add">
+		<input id="sef-domain-text" type='text' name='new-domain' value='' placeholder='Domain to Deny'>
+		<ul id="sef-domain-list">
+			<?php
+			foreach ($options as $domain) {
+				?>
+				<li>
+					<input name="sef_denied_domains[]" type="hidden" value="<?php echo $domain; ?>" />
+					<button class="button">Remove </button>&nbsp;
+					<?php echo $domain; ?>
+				</li>
+				<?php
+			}
+			?>
+		</ul>
+		<script type="text/javascript">
+			jQuery(document).ready( function($){
+				$('#sef-add-btn').click( function(evt){
+					evt.preventDefault()
+					var domain = $('#sef-domain-text').val()
+					var newLI = $(
+						'<li>' + 
+							'<input name="sef_denied_domains[]" type="hidden" value="'  + domain + '" />' +
+							'<button class="button">Remove </button>&nbsp;' +
+							domain +
+
+						'</li>'
+					)
+					newLI.hide()
+					$('#sef-domain-list').append(
+						newLI
+					)
+					newLI.fadeIn()
+					$('#sef-domain-text').val('')
+					return false
+				})
+				$('#sef-domain-list').on('click', 'button', function(evt){
+					evt.preventDefault()
+					$(this).parent().fadeOut(500, function(){ $(this).remove() })
+					return false
+				})
+			})
+		</script>
+	<?php
+}
+
+function sef_denied_domains_callback() { 
+	echo __( 'Deny domains from registering on your site, use the input field below and click update when done', 'sef_domain' );
+}
+
+function sef_options_page() { 
+	?>
+	<form action='options.php' method='post'>
+		
+		<h2>Simple Email Filter &amp; User Ban</h2>
+		
+		<?php
+		settings_fields( 'pluginPage' );
+		do_settings_sections( 'pluginPage' );
+		submit_button();
+		?>
+		
+	</form>
+	<?php
 }

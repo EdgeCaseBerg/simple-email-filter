@@ -44,11 +44,17 @@ function __sef_get_ip() {
 function sef_domain_check_for_registration($errors, $sanitized_user_login, $user_email) {
     $spamdomains = get_option( 'sef_denied_domains' );
     $ip = __sef_get_ip();
-    foreach ($spamdomains as $domain) {
-        if ( strpos($user_email, $domain) !== false ) {
-            $errors->add( 'spam_error', __('<strong>ERROR</strong>: ' . SEF_DENY_MESSAGE,'sef_domain') );
-            error_log('SPAMALERT: [email:' . $user_email . ', IP Address: ' .  $ip .']');
-        }
+    $emailParts = explode('@', $user_email);
+    if (count($emailParts) == 2) {
+    	$userDomain = $emailParts[1];
+    	foreach ($spamdomains as $domain) {
+        	if ( strpos($userDomain, $domain) !== false ) {
+	            $errors->add( 'spam_error', __('<strong>ERROR</strong>: ' . SEF_DENY_MESSAGE,'sef_domain') );
+            	error_log('SPAMALERT: [email:' . $user_email . ', IP Address: ' .  $ip .']');
+        	}
+    	}
+    } else {
+    	$errors->add( 'invalid email', __('<strong>ERROR</strong> Emails must have an @ sign'), 'sef_domain');
     }
 
     return $errors;
